@@ -64,6 +64,10 @@ function createEntry(): HTMLButtonElement {
 const FAMILY_SELECTOR = '[data-dsh-taskboard-entry], [data-dsh-ssh-entry], [data-dsh-todo-entry], [data-dsh-att-entry]'
 
 function placeEntry(root: HTMLElement, entry: HTMLButtonElement): boolean {
+  // 过期实例绝不抢插。守卫必须在这里而不是只在 tryPlace：rootObserver 也直接调本函数，
+  // 少了它，旧实例会把入口插回来 —— 表现就是侧边栏多出一个入口。
+  const owners = document.querySelectorAll(ENTRY_SELECTOR)
+  if (owners.length > 1 || (owners.length === 1 && owners[0] !== entry)) return false
   const button = newSessionButton(root)
   if (button === undefined) return false
   const host = entryHost(button, root)
@@ -110,7 +114,21 @@ export function mountSidebarEntry(): () => void {
     if (placed) rootObserver.observe(root, { childList: true, subtree: true })
   }
 
-  const waitObserver = new MutationObserver(() => { tryPlace() })
+  /**
+   * 清掉场上不属于本实例的入口。
+   * 上限 20 次：万一遇到更老的、没有守卫的实例反复插回，也不会陷入无限循环。
+   */
+  let sweepBudget = 20
+  const sweepForeign = (): void => {
+    if (sweepBudget <= 0) return
+    for (const el of document.querySelectorAll(ENTRY_SELECTOR)) {
+      if (el === entry) continue
+      el.remove()
+      sweepBudget -= 1
+    }
+  }
+
+  const waitObserver = new MutationObserver(() => { sweepForeign(); tryPlace() })
   waitObserver.observe(document.body, { childList: true, subtree: true })
 
   const rootObserver = new MutationObserver(() => {
@@ -119,6 +137,7 @@ export function mountSidebarEntry(): () => void {
       tryPlace()
       return
     }
+    sweepForeign()
     if (!root.contains(entry)) placed = placeEntry(root, entry)
   })
 
