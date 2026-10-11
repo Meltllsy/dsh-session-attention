@@ -1,0 +1,52 @@
+name: dsh-compat
+
+# DSH 演进快：每周自动拿「最新发布的 DSH 包」跑一遍兼容自检，
+# 15 项依赖里任何一项不再成立就自动开 issue。
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+jobs:
+  compat:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 取最新发布的 DSH 版本号
+        id: dsh
+        run: |
+          V=$(npm view @deepseek-ai/dsh versions --json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const v=JSON.parse(s);console.log(v[v.length-1])})")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "最新 DSH: $V"
+
+      - name: 装一份最新 DSH 的包
+        run: |
+          mkdir -p /tmp/dsh && cd /tmp/dsh
+          npm init -y >/dev/null
+          V=${{ steps.dsh.outputs.version }}
+          npm i --no-save --no-audit --no-fund --ignore-scripts \
+            @deepseek-ai/dsh-client-modules@$V @deepseek-ai/dsh-client-ui-workspace@$V \
+            @deepseek-ai/dsh-client-ui-sidebar@$V @deepseek-ai/dsh-client-ui-session@$V \
+            @deepseek-ai/dsh-client-ui-layout@$V @deepseek-ai/dsh-client-ui-conversation@$V \
+            @deepseek-ai/dsh-session@$V @deepseek-ai/dsh-tool-ask-user@$V \
+            @deepseek-ai/dsh-host-webserver@$V @deepseek-ai/dsh-system-prompt@$V \
+            @deepseek-ai/dsh-user-approval@$V @deepseek-ai/dsh-agent-loop@$V
+
+      - name: 兼容性自检
+        run: node scripts/check-compat.mjs --from /tmp/dsh/node_modules/@deepseek-ai | tee /tmp/compat.txt
+
+      - name: 不兼容就开 issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "DSH ${{ steps.dsh.outputs.version }} 兼容性自检未通过" \
+            --body-file /tmp/compat.txt || true

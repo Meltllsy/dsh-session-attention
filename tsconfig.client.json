@@ -1,0 +1,20 @@
+{
+  // 客户端半（浏览器 React）的类型检查配置：主 tsconfig 只编译 host（exclude src/client、
+  // lib 无 DOM），而 tsdown 只做类型擦除不做检查，因此客户端代码此前完全没有类型把关。
+  // 这份配置补上这道检查：npm run typecheck 会同时跑 host 与 client。
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/client", "src/types.ts"]
+}

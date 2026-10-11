@@ -1,0 +1,29 @@
+name: release
+
+# 打 tag（v*）时：装依赖 → 类型检查 → 发布到 npm → 建 GitHub Release。
+# 需要仓库 Secrets 配一个 NPM_TOKEN（npmjs.com → Access Tokens）。
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm install
+      - run: npm run typecheck
+      - name: 发布到 npm
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: 建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true

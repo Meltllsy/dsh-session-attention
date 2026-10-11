@@ -1,0 +1,78 @@
+{
+  "name": "dsh-session-attention",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "DSH 会话提醒插件：agent 完成一轮 / 提问 / 需要审批时提醒（系统通知 + 提示音），外加显示活跃会话的活动悬浮球，点会话行可直接跳转。",
+  "main": "./lib/index.js",
+  "types": "./lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "Apache-2.0",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ],
+      "platform": "web"
+    },
+    "engines": {
+      "dsh": ">=0.2.0-rc.2"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "~18.3.0",
+    "@types/react-dom": "~18.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.7.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:client": "tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json",
+    "prepack": "npm run build && npm run build:client",
+    "check:compat": "node scripts/check-compat.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "notification",
+    "attention",
+    "session",
+    "提醒",
+    "通知"
+  ],
+  "author": "Meltllsy",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Meltllsy/dsh-session-attention.git"
+  },
+  "homepage": "https://github.com/Meltllsy/dsh-session-attention#readme",
+  "bugs": {
+    "url": "https://github.com/Meltllsy/dsh-session-attention/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

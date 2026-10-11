@@ -1,0 +1,7 @@
+# dsh-session-attention bundle 层：插入插件行。
+# host 半（exports "."）跑在 host 进程（AttentionService + webServer API + SSE + 会话事件监听）；
+# client 半（exports "./client"，/plugins/<id>/client.js）跑在 Web GUI（侧边栏入口 + 提醒 toast + 活动球）。
+- insert:
+    - id: session-attention
+      name: 'dsh-session-attention'
+      config: {}
