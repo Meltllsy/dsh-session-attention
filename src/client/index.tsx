@@ -10,7 +10,7 @@ import { attentionStore } from './attention-store.ts'
 import { AttentionLayer } from './AttentionLayer.tsx'
 import { AttentionPanel } from './AttentionPanel.tsx'
 import { resolveSessionRow, setSessionOpener, setSessionTitleResolver, type SessionTarget } from './session-nav.ts'
-import { registerPanel, seatsAvailable, syncPanelWithLayout } from './panel-seat.tsx'
+import { PANEL_ID, registerPanel, seatsAvailable, syncPanelWithLayout } from './panel-seat.tsx'
 import { mountSidebarEntry } from './sidebar-entry.ts'
 import { injectStyles } from './styles.ts'
 
@@ -210,20 +210,44 @@ export function apply(ctx: AttentionClientContext): () => void {
       return false
     })()
   }))
-  try {
-    // 0.2 起优先用外壳自己的面板座位：行框/高亮/折叠/切换都由外壳拥有，
-    // 页面只在被选中时挂载 —— 既不会盖住别的页面，也不会被别的插件带歪样式。
-    if (seatsAvailable(ctx)) {
-      disposers.push(registerPanel(ctx))
-      disposers.push(syncPanelWithLayout(ctx))
-    } else {
-      // 旧版外壳没有 sidebar.panellist / main 座位，退回 DOM 注入。
+  /** 旧路径：DOM 注入（旧版外壳，或官方座位没生效时的兜底）。 */
+  const mountLegacyUi = (): void => {
+    try {
       disposers.push(mountSidebarEntry())
       disposers.push(mountPanel())
+    } catch (error) {
+      console.error('[dsh-session-attention] DOM 入口挂载失败:', error)
     }
-    disposers.push(mountLayer())
-  } catch (error) {
-    console.error('[dsh-session-attention] mount failed:', error)
+  }
+
+  // 全局层（提醒层 / 右侧待办条 / 活动悬浮球）与面板座位无关，无条件先挂：
+  // 之前它排在座位注册之后，座位一抛异常就被连坐 —— 表现就是「入口不见了，悬浮窗也不见了」。
+  try { disposers.push(mountLayer()) } catch (error) { console.error('[dsh-session-attention] 全局层挂载失败:', error) }
+
+  // 0.2 起优先用外壳自己的面板座位：行框/高亮/折叠/切换都由外壳拥有，
+  // 页面只在被选中时挂载 —— 既不会盖住别的页面，也不会被别的插件带歪样式。
+  let seatRegistered = false
+  if (seatsAvailable(ctx)) {
+    try {
+      disposers.push(registerPanel(ctx))
+      disposers.push(syncPanelWithLayout(ctx))
+      seatRegistered = true
+    } catch (error) {
+      console.error('[dsh-session-attention] 官方座位注册失败，退回 DOM 注入:', error)
+    }
+  }
+  if (!seatRegistered) {
+    mountLegacyUi()
+  } else {
+    // 兜底校验：座位服务存在 ≠ 外壳真的收下了这一行（参数不符时会被静默忽略）。
+    // 几秒后仍看不到我们的行图标，就退回 DOM 注入，保证入口一定在。
+    const verifyTimer = window.setTimeout(() => {
+      if (document.querySelector('[data-dsh-panel-entry="' + PANEL_ID + '"]') === null) {
+        console.warn('[dsh-session-attention] 官方座位未生效，退回 DOM 注入')
+        mountLegacyUi()
+      }
+    }, 4000)
+    disposers.push(() => window.clearTimeout(verifyTimer))
   }
 
   return () => {

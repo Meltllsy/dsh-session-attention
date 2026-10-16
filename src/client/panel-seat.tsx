@@ -42,9 +42,21 @@ export interface SeatContext {
   get?: (name: string) => unknown
 }
 
+/**
+ * 安全取服务：cordis 里直接读一个未注入的服务会抛异常（这正是「入口和悬浮窗一起消失」的原因），
+ * 所以先 try 直接读、再用 ctx.get（对不存在的服务返回 undefined，不抛）。
+ */
+export function service<T>(ctx: SeatContext, name: string): T | undefined {
+  try {
+    const direct = (ctx as unknown as Record<string, unknown>)[name]
+    if (direct !== undefined) return direct as T
+  } catch { /* 未注入的服务：忽略，走 ctx.get */ }
+  try { return ctx.get?.(name) as T | undefined } catch { return undefined }
+}
+
 /** 外壳是否提供官方座位（旧版外壳没有，于是退回 DOM 注入）。 */
 export function seatsAvailable(ctx: SeatContext): boolean {
-  const slots = ctx.slots
+  const slots = service<SlotService>(ctx, 'slots')
   return slots !== undefined && typeof slots.inject === 'function' && typeof slots.register === 'function'
 }
 
@@ -69,7 +81,7 @@ export function PanelPage(): ReactElement {
 
 /** 注册侧边栏行 + 主视图页面。 */
 export function registerPanel(ctx: SeatContext): () => void {
-  const slots = ctx.slots!
+  const slots = service<SlotService>(ctx, 'slots')!
   const disposers: Array<() => void> = []
   disposers.push(slots.inject('sidebar.panellist', () => slots.register({
     name: 'sidebar.panellist',
@@ -87,7 +99,7 @@ export function registerPanel(ctx: SeatContext): () => void {
  * store 这边关闭（点 ✕）→ 让外壳切回对话。两边都做等值判断，不会互相触发成环。
  */
 export function syncPanelWithLayout(ctx: SeatContext): () => void {
-  const layout = ctx.get?.('layout') as LayoutService | undefined
+  const layout = service<LayoutService>(ctx, 'layout')
   const info = layout?.panelInfo
   if (info === undefined) return () => { /* 没有布局服务：面板开关只影响自身 */ }
   const pull = (): void => {
