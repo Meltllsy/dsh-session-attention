@@ -10,6 +10,7 @@ import { attentionStore } from './attention-store.ts'
 import { AttentionLayer } from './AttentionLayer.tsx'
 import { AttentionPanel } from './AttentionPanel.tsx'
 import { resolveSessionRow, setSessionOpener, setSessionTitleResolver, type SessionTarget } from './session-nav.ts'
+import { registerPanel, seatsAvailable, syncPanelWithLayout } from './panel-seat.tsx'
 import { mountSidebarEntry } from './sidebar-entry.ts'
 import { injectStyles } from './styles.ts'
 
@@ -151,6 +152,10 @@ export const inject = ['sessions', 'uiWorkspace']
 /** 客户端上下文最小接口。 */
 export interface AttentionClientContext {
   readonly sessions?: unknown
+  /** 官方座位服务（0.2 起）；缺席时退回 DOM 注入。 */
+  readonly slots?: { inject(key: string, callback: () => () => void): () => void, register(options: Record<string, unknown>, component: unknown): () => void }
+  /** cordis 上下文取值（本插件只取 layout）。 */
+  readonly get?: (name: string) => unknown
   /**
    * ui-workspace 客户端服务（DSH 0.2 起的官方主视图切换入口）。
    * 缺席时退回「委托侧边栏行点击」的老办法。
@@ -206,8 +211,16 @@ export function apply(ctx: AttentionClientContext): () => void {
     })()
   }))
   try {
-    disposers.push(mountSidebarEntry())
-    disposers.push(mountPanel())
+    // 0.2 起优先用外壳自己的面板座位：行框/高亮/折叠/切换都由外壳拥有，
+    // 页面只在被选中时挂载 —— 既不会盖住别的页面，也不会被别的插件带歪样式。
+    if (seatsAvailable(ctx)) {
+      disposers.push(registerPanel(ctx))
+      disposers.push(syncPanelWithLayout(ctx))
+    } else {
+      // 旧版外壳没有 sidebar.panellist / main 座位，退回 DOM 注入。
+      disposers.push(mountSidebarEntry())
+      disposers.push(mountPanel())
+    }
     disposers.push(mountLayer())
   } catch (error) {
     console.error('[dsh-session-attention] mount failed:', error)
