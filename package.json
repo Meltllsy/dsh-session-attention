@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-attention",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "DSH 会话提醒插件：agent 完成一轮 / 提问 / 需要审批时提醒（系统通知 + 提示音），外加显示活跃会话的活动悬浮球，点会话行可直接跳转。",
   "main": "./lib/index.js",
