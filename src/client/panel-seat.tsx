@@ -12,6 +12,7 @@
  */
 
 import type { ReactElement } from 'react'
+import { AttentionLayer } from './AttentionLayer.tsx'
 import { AttentionPanel } from './AttentionPanel.tsx'
 import { attentionStore } from './attention-store.ts'
 
@@ -38,26 +39,8 @@ interface LayoutService {
 
 /** 客户端上下文里本插件用到的两样东西。 */
 export interface SeatContext {
-  slots?: SlotService
-  get?: (name: string) => unknown
-}
-
-/**
- * 安全取服务：cordis 里直接读一个未注入的服务会抛异常（这正是「入口和悬浮窗一起消失」的原因），
- * 所以先 try 直接读、再用 ctx.get（对不存在的服务返回 undefined，不抛）。
- */
-export function service<T>(ctx: SeatContext, name: string): T | undefined {
-  try {
-    const direct = (ctx as unknown as Record<string, unknown>)[name]
-    if (direct !== undefined) return direct as T
-  } catch { /* 未注入的服务：忽略，走 ctx.get */ }
-  try { return ctx.get?.(name) as T | undefined } catch { return undefined }
-}
-
-/** 外壳是否提供官方座位（旧版外壳没有，于是退回 DOM 注入）。 */
-export function seatsAvailable(ctx: SeatContext): boolean {
-  const slots = service<SlotService>(ctx, 'slots')
-  return slots !== undefined && typeof slots.inject === 'function' && typeof slots.register === 'function'
+  slots: SlotService
+  layout?: LayoutService
 }
 
 /** 行图标：外壳给尺寸与选中态，本组件只画 glyph。 */
@@ -70,18 +53,9 @@ function PanelIcon({ size }: { size: number, active: boolean }): ReactElement {
   )
 }
 
-/** 主视图页面：外壳只在本面板被选中时挂载它。 */
-export function PanelPage(): ReactElement {
-  return (
-    <div className="todo-panel-page" data-dsh-att-view="" data-dsh-plugin="session-attention">
-      <AttentionPanel />
-    </div>
-  )
-}
-
 /** 注册侧边栏行 + 主视图页面。 */
 export function registerPanel(ctx: SeatContext): () => void {
-  const slots = service<SlotService>(ctx, 'slots')!
+  const slots = ctx.slots
   const disposers: Array<() => void> = []
   disposers.push(slots.inject('sidebar.panellist', () => slots.register({
     name: 'sidebar.panellist',
@@ -89,7 +63,12 @@ export function registerPanel(ctx: SeatContext): () => void {
     order: PANEL_ORDER,
     label: () => '提醒',
   }, PanelIcon)))
-  disposers.push(slots.inject('main', () => slots.register({ name: 'main', key: PANEL_ID }, PanelPage as never)))
+  const Page = (): ReactElement => (
+    <div className="todo-panel-page" data-dsh-att-view="" data-dsh-plugin="session-attention-layer">
+      <AttentionPanel onClose={() => closePanel(ctx)} />
+    </div>
+  )
+  disposers.push(slots.inject('main', () => slots.register({ name: 'main', key: PANEL_ID }, Page as never)))
   return () => { for (const dispose of disposers.splice(0)) { try { dispose() } catch { /* 忽略清理异常 */ } } }
 }
 
@@ -98,21 +77,30 @@ export function registerPanel(ctx: SeatContext): () => void {
  * 外壳那边切换 → 同步进 store（✕ / Esc 才有意义）；
  * store 这边关闭（点 ✕）→ 让外壳切回对话。两边都做等值判断，不会互相触发成环。
  */
-export function syncPanelWithLayout(ctx: SeatContext): () => void {
-  const layout = service<LayoutService>(ctx, 'layout')
-  const info = layout?.panelInfo
-  if (info === undefined) return () => { /* 没有布局服务：面板开关只影响自身 */ }
-  const pull = (): void => {
-    const open = info.getSnapshot().activePanelId === PANEL_ID
-    if (attentionStore.getSnapshot().panelOpen !== open) attentionStore.setPanel(open)
-  }
-  const unsubscribe = info.subscribe(pull)
-  const push = attentionStore.subscribe(() => {
-    const open = attentionStore.getSnapshot().panelOpen
-    const active = info.getSnapshot().activePanelId === PANEL_ID
-    if (open && !active) layout?.selectPanel?.(PANEL_ID)
-    else if (!open && active) layout?.selectPanel?.(null)
-  })
-  pull()
-  return () => { unsubscribe(); push() }
+/**
+ * 单向绑定：面板里的 ✕ 关掉自己时，让外壳把主视图切回对话。
+ * 刻意不做「外壳 → store」的反向同步：两个真相源互相写会形成死循环，
+ * 表现就是高亮卡住、✕ 关不掉。选中态完全由外壳拥有。
+ */
+/**
+ * 显式关闭：只在用户点面板里的 ✕ 时调用 —— 让外壳把主视图切回对话。
+ * 刻意不做任何自动/订阅式的切换：之前那版订阅在挂载时就触发了一次，
+ * 表现就是「插件一加载，界面自己跳回会话」，把你正在看的页面顶掉。
+ */
+export function closePanel(ctx: SeatContext): void {
+  try { ctx.layout?.selectPanel?.(null) } catch (error) { console.warn('[dsh-session-attention] 切回对话失败:', error) }
+}
+
+/**
+ * 悬浮层（待办条 / 活动悬浮球 / 提醒 toast）注册进外壳的 shell.overlay 座位：
+ * 这是「整帧浮动层，位于所有列之上」。以前是自己 append 到 document.body ——
+ * 于是外壳停用插件时只回收了它的座位内容，我们的节点留在页面上（悬浮窗不消失）。
+ */
+export function registerOverlay(ctx: SeatContext): () => void {
+  const slots = ctx.slots
+  return slots.inject('shell.overlay', () => slots.register({
+    name: 'shell.overlay',
+    id: 'session-attention-layer',
+    order: 60,
+  }, AttentionLayer as never))
 }

@@ -10,8 +10,7 @@ import { attentionStore } from './attention-store.ts'
 import { AttentionLayer } from './AttentionLayer.tsx'
 import { AttentionPanel } from './AttentionPanel.tsx'
 import { resolveSessionRow, setSessionOpener, setSessionTitleResolver, type SessionTarget } from './session-nav.ts'
-import { PANEL_ID, registerPanel, seatsAvailable, syncPanelWithLayout } from './panel-seat.tsx'
-import { mountSidebarEntry } from './sidebar-entry.ts'
+import { registerOverlay, registerPanel } from './panel-seat.tsx'
 import { injectStyles } from './styles.ts'
 
 /** 跨插件面板互斥事件（与 task-board / ssh / 待办 同契约）。 */
@@ -51,109 +50,13 @@ function findConversationColumn(): HTMLElement | undefined {
  * 面板挂载：容器插进中心列，打开时占满它（独立页面式，与任务看板 / SSH 一致），
  * 中心列其余内容暂时隐藏；关闭后立刻回到对话。开合由 store 的 panelOpen 驱动。
  */
-function mountPanel(): () => void {
-  document.querySelectorAll('[data-dsh-att-view]').forEach((el) => el.remove())
-  document.querySelectorAll('[' + HOST_ATTR + ']').forEach((el) => el.removeAttribute(HOST_ATTR))
-
-  let root: Root | undefined
-  let container: HTMLDivElement | undefined
-
-  /** 卸掉容器与宿主标记：宿主被换、面板关闭、插件卸载都会走这里。 */
-  const teardown = (): void => {
-    try { root?.unmount() } catch { /* 忽略清理异常 */ }
-    root = undefined
-    container?.remove()
-    container = undefined
-    document.querySelectorAll('[' + HOST_ATTR + ']').forEach((el) => el.removeAttribute(HOST_ATTR))
-  }
-
-  const ensure = (): void => {
-    // 只在打开时挂载：关掉后 DOM 里不留残留，插件被停用时也就不会有一块东西盖住界面。
-    if (!attentionStore.getSnapshot().panelOpen) { if (container !== undefined) teardown(); return }
-    // 自愈：外壳/别的插件重渲染会把宿主换掉，此时容器已是游离节点，必须重建。
-    if (container !== undefined && container.isConnected) return
-    teardown()
-    const column = findConversationColumn()
-    if (column === undefined) return
-    column.setAttribute(HOST_ATTR, '')
-    container = document.createElement('div')
-    container.dataset.dshAttView = ''
-    column.appendChild(container)
-    root = createRoot(container)
-    root.render(<AttentionPanel />)
-  }
-
-  const waitObserver = new MutationObserver(() => { ensure() })
-  waitObserver.observe(document.body, { childList: true, subtree: true })
-
-  const applyActive = (): void => {
-    if (attentionStore.getSnapshot().panelOpen) {
-      for (const attr of SIBLING_ATTRS) document.documentElement.removeAttribute(attr)
-      document.documentElement.setAttribute(ACTIVE_ATTR, '')
-      document.dispatchEvent(new CustomEvent(ACTIVATE_EVENT, { detail: PANEL_NAME }))
-    } else {
-      document.documentElement.removeAttribute(ACTIVE_ATTR)
-    }
-    ensure()
-  }
-  const close = (): void => { if (attentionStore.getSnapshot().panelOpen) attentionStore.setPanel(false) }
-  const onOtherActivate = (event: Event): void => {
-    if ((event as CustomEvent).detail !== PANEL_NAME) close()
-  }
-  const onKeyDown = (event: KeyboardEvent): void => { if (event.key === 'Escape') close() }
-  const SIDEBAR_ROW_SELECTOR = '[class*="sessionRow"], [class*="projectRow"], [class*="searchResultRow"], [class*="searchResultWorkspace"], [class*="newSession"]'
-  const onClickSidebarRow = (event: MouseEvent): void => {
-    const target = event.target as HTMLElement | null
-    if (target === null) return
-    // 点自己的侧边栏入口不算「点了会话行」：本监听在捕获阶段先跑，若在这里 close()，
-    // 紧接着入口自身的 click 又 togglePanel() 开回来 —— 表现就是「点了关不掉」。
-    if (target.closest('[data-dsh-att-entry]') !== null) return
-    if (target.closest(SIDEBAR_ROW_SELECTOR) !== null) close()
-  }
-
-  document.addEventListener('keydown', onKeyDown)
-  document.addEventListener('click', onClickSidebarRow, true)
-  document.addEventListener(ACTIVATE_EVENT, onOtherActivate)
-  const unsubscribe = attentionStore.subscribe(applyActive)
-  applyActive()
-  ensure()
-
-  return () => {
-    document.removeEventListener('keydown', onKeyDown)
-    document.removeEventListener('click', onClickSidebarRow, true)
-    document.removeEventListener(ACTIVATE_EVENT, onOtherActivate)
-    waitObserver.disconnect()
-    unsubscribe()
-    document.documentElement.removeAttribute(ACTIVE_ATTR)
-    teardown()
-  }
-}
-/** 全局提醒层挂载（body 上的 React 根，跨会话常驻；内含活动悬浮球）。 */
-function mountLayer(): () => void {
-  document.querySelectorAll('[data-dsh-att-layer]').forEach((el) => el.remove())
-
-  const container = document.createElement('div')
-  container.dataset.dshAttLayer = ''
-  document.body.appendChild(container)
-  const root = createRoot(container)
-  root.render(<AttentionLayer />)
-  return () => {
-    root.unmount()
-    container.remove()
-  }
-}
-
-/**
- * 声明依赖 `sessions` 服务：它保证本插件在客户端会话控制器就绪之后才 apply，
- * 侧边栏/主视图此时已可被定位（跳转本身走 DOM 委托，不调用该服务）。
- */
-export const inject = ['sessions', 'uiWorkspace']
+export const inject = ['sessions', 'uiWorkspace', 'slots', 'layout']
 
 /** 客户端上下文最小接口。 */
 export interface AttentionClientContext {
   readonly sessions?: unknown
   /** 官方座位服务（0.2 起）；缺席时退回 DOM 注入。 */
-  readonly slots?: { inject(key: string, callback: () => () => void): () => void, register(options: Record<string, unknown>, component: unknown): () => void }
+  readonly slots: { inject(key: string, callback: () => () => void): () => void, register(options: Record<string, unknown>, component: unknown): () => void }
   /** cordis 上下文取值（本插件只取 layout）。 */
   readonly get?: (name: string) => unknown
   /**
@@ -211,48 +114,27 @@ export function apply(ctx: AttentionClientContext): () => void {
     })()
   }))
   /** 旧路径：DOM 注入（旧版外壳，或官方座位没生效时的兜底）。 */
-  const mountLegacyUi = (): void => {
-    try {
-      disposers.push(mountSidebarEntry())
-      disposers.push(mountPanel())
-    } catch (error) {
-      console.error('[dsh-session-attention] DOM 入口挂载失败:', error)
-    }
-  }
+  // 全局层（提醒层 / 右侧待办条 / 活动悬浮球）：与面板座位无关，独立挂载。
 
-  // 全局层（提醒层 / 右侧待办条 / 活动悬浮球）与面板座位无关，无条件先挂：
-  // 之前它排在座位注册之后，座位一抛异常就被连坐 —— 表现就是「入口不见了，悬浮窗也不见了」。
-  try { disposers.push(mountLayer()) } catch (error) { console.error('[dsh-session-attention] 全局层挂载失败:', error) }
+  // 面板 = 外壳官方座位（sidebar.panellist 行 + main 页面），单一实现。
+  // 不再保留 DOM 注入回退：回退会静默接管，让人以为修好了，实际一直跑旧路径 ——
+  // 重复入口、灰底、✕ 关不掉，全是它造成的。座位不可用时宁可不显示，也不假装正常。
+  try { disposers.push(registerPanel(ctx)) } catch (error) { console.error('[dsh-session-attention] 面板座位注册失败:', error) }
+  try { disposers.push(registerOverlay(ctx)) } catch (error) { console.error('[dsh-session-attention] 悬浮层注册失败:', error) }
 
-  // 0.2 起优先用外壳自己的面板座位：行框/高亮/折叠/切换都由外壳拥有，
-  // 页面只在被选中时挂载 —— 既不会盖住别的页面，也不会被别的插件带歪样式。
-  let seatRegistered = false
-  if (seatsAvailable(ctx)) {
-    try {
-      disposers.push(registerPanel(ctx))
-      disposers.push(syncPanelWithLayout(ctx))
-      seatRegistered = true
-    } catch (error) {
-      console.error('[dsh-session-attention] 官方座位注册失败，退回 DOM 注入:', error)
-    }
-  }
-  if (!seatRegistered) {
-    mountLegacyUi()
-  } else {
-    // 兜底校验：座位服务存在 ≠ 外壳真的收下了这一行（参数不符时会被静默忽略）。
-    // 几秒后仍看不到我们的行图标，就退回 DOM 注入，保证入口一定在。
-    const verifyTimer = window.setTimeout(() => {
-      if (document.querySelector('[data-dsh-panel-entry="' + PANEL_ID + '"]') === null) {
-        console.warn('[dsh-session-attention] 官方座位未生效，退回 DOM 注入')
-        mountLegacyUi()
-      }
-    }, 4000)
-    disposers.push(() => window.clearTimeout(verifyTimer))
-  }
-
-  return () => {
+  /** 统一清理：幂等（splice 后为空即无事），dispose 事件与返回值共用。 */
+  const cleanup = (): void => {
     for (const dispose of disposers.splice(0)) {
-      try { dispose() } catch { /* 忽略清理异常 */ }
+      try { dispose() } catch { }
     }
   }
+
+  // 外壳停用插件时不一定调用返回的清理函数（表现：关掉插件后右侧悬浮窗仍在），
+  // 顺手订阅 cordis 的 dispose 事件兜住；上下文不支持就忽略。
+  try {
+    const onDispose = (ctx as any).on
+    if (typeof onDispose === 'function') onDispose.call(ctx, 'dispose', cleanup)
+  } catch { }
+
+  return cleanup
 }

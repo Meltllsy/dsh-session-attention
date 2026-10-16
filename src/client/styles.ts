@@ -71,7 +71,8 @@ html[data-dsh-attention-active] [data-dsh-att-host] > :not([data-dsh-att-view]) 
 [data-sidebar-collapsed] [data-dsh-att-entry] .todo-entry-label { display: none; }
 
 /* --- 官方 main 座位里的页面外层（外壳只在选中本面板时挂载它） ----------- */
-.todo-panel-page { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
+.todo-panel-page { display: flex; flex-direction: column; height: 100%; max-height: 100%; min-height: 0; overflow: hidden; box-sizing: border-box; }
+.todo-panel-page > .todo-panel { flex: 1 1 auto; min-height: 0; }
 
 /* --- 面板主体 ------------------------------------------------------------ */
 .todo-panel {

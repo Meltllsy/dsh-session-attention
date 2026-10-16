@@ -19,7 +19,8 @@ function formatTime(ms: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
-export function AttentionPanel(): ReactElement {
+export function AttentionPanel(props: { onClose?: () => void }): ReactElement {
+  const onClose = props.onClose
   const { data, error, activity, latest } = useSyncExternalStore(attentionStore.subscribe, attentionStore.getSnapshot)
   const settings = data?.settings ?? DEFAULT_SETTINGS
   const { attention, ball } = settings
@@ -54,7 +55,7 @@ export function AttentionPanel(): ReactElement {
           className="todo-btn"
           title="关闭面板（Esc 也可以）"
           aria-label="关闭"
-          onClick={() => attentionStore.setPanel(false)}
+          onClick={() => { attentionStore.setPanel(false); onClose?.() }}
         >
           ✕
         </button>
