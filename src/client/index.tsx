@@ -19,8 +19,32 @@ const PANEL_NAME = 'attention'
 const ACTIVE_ATTR = 'data-dsh-attention-active'
 const SIBLING_ATTRS = ['data-dsh-todo-active', 'data-dsh-ssh-active', 'data-dsh-taskboard-active']
 
-/** 中心列（对话列）容器选择器：0.1.6 起 data-pane 标记被移除，回退到 centerCol 类名。 */
-const CONVERSATION_SELECTOR = '[data-pane="conversation"], [class*="centerCol"], [class*="_centerCol"]'
+/**
+ * 中心列（对话列）候选，**按优先级逐个试**。
+ * 注意：querySelector 的逗号列表是「文档顺序优先」而不是「选择器顺序优先」——别的插件的外层
+ * 容器只要类名带 centerCol 就会被选中，而 inset:0 的面板挂上去会盖满整个 UI。
+ * 0.1.6 起 data-pane 标记被移除，回退到 centerCol / _centerCol 类名。
+ */
+const COLUMN_CANDIDATES = ['[data-pane="conversation"]', '[class*="centerCol"]', '[class*="_centerCol"]']
+
+/** 宿主标记：定位与隐藏兄弟都只作用于自己挂载的这个元素，避免误伤其他插件的同名容器。 */
+const HOST_ATTR = 'data-dsh-att-host'
+
+/** 应用外壳判定：含侧边栏（或本插件的侧边栏入口）的容器不是对话列，挂上去必然盖满整个 UI。 */
+function looksLikeAppShell(el: HTMLElement): boolean {
+  if (el === document.body || el === document.documentElement) return true
+  return el.querySelector('[data-pane="sidebar"], [class*="sidebarCol"], [data-dsh-todo-entry], [data-dsh-att-entry]') !== null
+}
+
+/** 找对话列：按优先级 + 外壳校验；找不到就返回 undefined（宁可不挂，也不盖满 UI）。 */
+function findConversationColumn(): HTMLElement | undefined {
+  for (const selector of COLUMN_CANDIDATES) {
+    for (const el of document.querySelectorAll<HTMLElement>(selector)) {
+      if (!looksLikeAppShell(el)) return el
+    }
+  }
+  return undefined
+}
 
 /**
  * 面板挂载：容器插进中心列，打开时占满它（独立页面式，与任务看板 / SSH 一致），
@@ -28,14 +52,29 @@ const CONVERSATION_SELECTOR = '[data-pane="conversation"], [class*="centerCol"],
  */
 function mountPanel(): () => void {
   document.querySelectorAll('[data-dsh-att-view]').forEach((el) => el.remove())
+  document.querySelectorAll('[' + HOST_ATTR + ']').forEach((el) => el.removeAttribute(HOST_ATTR))
 
   let root: Root | undefined
   let container: HTMLDivElement | undefined
 
+  /** 卸掉容器与宿主标记：宿主被换、面板关闭、插件卸载都会走这里。 */
+  const teardown = (): void => {
+    try { root?.unmount() } catch { /* 忽略清理异常 */ }
+    root = undefined
+    container?.remove()
+    container = undefined
+    document.querySelectorAll('[' + HOST_ATTR + ']').forEach((el) => el.removeAttribute(HOST_ATTR))
+  }
+
   const ensure = (): void => {
-    if (container !== undefined) return
-    const column = document.querySelector<HTMLElement>(CONVERSATION_SELECTOR)
-    if (column === null) return
+    // 只在打开时挂载：关掉后 DOM 里不留残留，插件被停用时也就不会有一块东西盖住界面。
+    if (!attentionStore.getSnapshot().panelOpen) { if (container !== undefined) teardown(); return }
+    // 自愈：外壳/别的插件重渲染会把宿主换掉，此时容器已是游离节点，必须重建。
+    if (container !== undefined && container.isConnected) return
+    teardown()
+    const column = findConversationColumn()
+    if (column === undefined) return
+    column.setAttribute(HOST_ATTR, '')
     container = document.createElement('div')
     container.dataset.dshAttView = ''
     column.appendChild(container)
@@ -54,6 +93,7 @@ function mountPanel(): () => void {
     } else {
       document.documentElement.removeAttribute(ACTIVE_ATTR)
     }
+    ensure()
   }
   const close = (): void => { if (attentionStore.getSnapshot().panelOpen) attentionStore.setPanel(false) }
   const onOtherActivate = (event: Event): void => {
@@ -84,10 +124,7 @@ function mountPanel(): () => void {
     waitObserver.disconnect()
     unsubscribe()
     document.documentElement.removeAttribute(ACTIVE_ATTR)
-    root?.unmount()
-    root = undefined
-    container?.remove()
-    container = undefined
+    teardown()
   }
 }
 /** 全局提醒层挂载（body 上的 React 根，跨会话常驻；内含活动悬浮球）。 */
